@@ -1,0 +1,28 @@
+
+    model {
+    # Priors and constraints
+    for(i in 1:nind){ # loop through individuals
+    for(t in f[i]:(n.occasions-1)){ # loop through occasions
+    phi[i,t] <- mean.phi # prior for survival for each t occasion is mean.phi
+    p[i,t] <- mean.p # prior for re-encounter for each occasion is mean.p
+      } # close loop through t
+    } # close loop through i
+    
+    mean.phi ~ dunif(0,1) # survival prior defined as random draw from uniform distribution between 0 and 1 inclusive
+    mean.p ~ dunif(0,1) # re-encounter prior
+    
+    # define likelihood
+    for(i in 1:nind){ # loop through individs
+     # define latent state at first capture
+      Z[i,f[1]] <- 1 # f is the occasion of marking
+      for(t in f([i] +1):n.occasions){ # loop through occasions
+      # state process
+      z[i,t] ~ bern(mu1[i,t]) # z is Bernoulli distributed variable with probability mu1 for each i individ at each t occasion
+        mu1[i,t] <- phit[i, t-1] * z[i, t-1] # mu1 probability of z is defined through phi
+      # observation process
+      y[i,t] ~ bern(mu2[i,t]) # observations y are Bernoulli distributed random variable with mean mu2
+        mu2[i,t] <- p[i,t-1]*z[i,t] # mu2 defined through re-encounter probability
+        } # close loop through t
+      } # close loop through i
+    } # close model statement for JAGS
+           

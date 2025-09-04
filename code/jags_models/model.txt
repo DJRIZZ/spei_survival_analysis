@@ -1,0 +1,35 @@
+
+    model {
+  # Priors for Phi: time-varying fixed effect (each phi[t] is independent with its own prior)
+  for (t in 1:(n.occasions - 1)) { # indexed to n.occasions-1 because phi and p are defined between t
+    logit(phi[t]) <- beta_phi[t]   # assign logit survival with beta_phi (logit phi) for each occasion
+    beta_phi[t] ~ dnorm(0, 0.001)  # draw vague prior for time-specific fixed effects for phi using normal distribution with mean 0 and precision 0.001
+  }
+
+  # Priors for p: time-varying random effect and fixed age effect
+  for (t in 1:(n.occasions - 1)) {
+    alpha_p[t] ~ dnorm(0, tau_p)  # draw prior for random effect for time from normal distribution with mean 0 and precision tau_p; each alpha_p[t] is drawn from the same distirbition
+  }
+
+  tau_p <- pow(sigma_p, -2)       # assign precision (inverse variance) for time random effect using sigma_p where 1/sigma_p^2 is the precision; sigma_p^2 is the variance 
+  mu_p ~ dnorm(0, 0.001)          # draw prior for global intercept for p from normal distribution with mean 0 and precision 0.001
+  beta_age ~ dnorm(0, 0.001)      # draw priors for fixed effect of age from normal distribution with mean 0 and precision 0.001
+  sigma_p ~ dunif(0, 5)           # draw SD hyperparameter (prior for a prior) of time random effect from uniform distribution between 0 and 5; influences how much p varies over t
+
+# priors: beta_phi[t], alpha_p[t], tau_p, mu_p, beta_age, sigma_p (where t is 34 occasions)
+
+  # Likelihood
+  for (i in 1:nind) {
+    z[i, f[i]] <- 1               # Latent state conditional on first capture 
+     # ---- State process ----
+    for (t in (f[i] + 1):n.occasions) { # indexed to n.occasions because individs are observed at each t
+      mu1[i,t] <- phi[t - 1] * z[i, t - 1] # assign phi for preceding occasion conditional on z of preceding occasion (dead individs stay dead)
+      z[i,t] ~ dbern(mu1[i,t])             # draw state z from Bernoulli distrib with probability mu1 for each individ and occasion
+      # ---- Observation process ----
+      logit(p[i, t]) <- mu_p + alpha_p[t - 1] + beta_age * age_return[i, t] # assign model for detection prob (p)
+      mu2[i, t] <- p[i, t] * z[i, t] # assign effective detection prob (i.e., prob that individ i is observed at time t) conditional on individ is alive (z = 1; can't detect dead individs)
+      y[i, t] ~ dbern(mu2[i, t])     # draw y (obsevation of capture 1 or non-capture 0) with probability mu2, same as p[i, t] if individ is alive; links observation process to the state process
+    } # close time
+  } # close individuals
+    } # close model statement
+    
