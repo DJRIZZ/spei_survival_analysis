@@ -10,4 +10,7 @@ analysis/*html
 analysis/*_cache
 analysis/site_libs
 data/
+output/
+metadata/
 archive/
+.positai

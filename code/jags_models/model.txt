@@ -1,13 +1,22 @@
 
     model {
-  # Priors for Phi: time-varying fixed effect (each phi[t] is independent with its own prior)
-  for (t in 1:(n.occasions - 1)) { # indexed to n.occasions-1 because phi and p are defined between t
-    logit(phi[t]) <- beta_phi[t]   # assign logit survival with beta_phi (logit phi) for each occasion
-    beta_phi[t] ~ dnorm(0, 0.001)  # draw vague prior for time-specific fixed effects for phi using normal distribution with mean 0 and precision 0.001
+  # Priors for Phi: quadratic ice-day effect + age effect for year 1 ducklings
+  beta_ice0 ~ dnorm(0, 0.001) # prior for phi intercept
+  beta_ice1 ~ dnorm(0, 0.001) # prior for phi ice_day linear effect
+  beta_ice2 ~ dnorm(0, 0.001) # prior for phi ice_day^2 effect
+  beta_first ~ dnorm(0, 0.001) # prior for the age effect on phi
+  
+  # Prior for random year variance for phi
+  sigma_year ~ dunif(0, 5)
+  tau_year <- pow(sigma_year, -2)
+  
+  # priors for random year effect
+  for(t in 1:(n.occasions-1)){ # indexed here phi[1]...phi[33]; phi is indexed to survival intervals, not resight occasions
+    year_effect[t] ~ dnorm(0, tau_year)
   }
-
+  
   # Priors for p: time-varying random effect and fixed age effect
-  for (t in 1:(n.occasions - 1)) {
+  for (t in 1:(n.occasions)) { # index to occasions p[2]=t[2], p[1] not in likelihood because t > f[i] and p[1] = f; NB this is different from Kery and Schaub indexing, they offset t-1 so p[1] = t[2]
     alpha_p[t] ~ dnorm(0, tau_p)  # draw prior for random effect for time from normal distribution with mean 0 and precision tau_p; each alpha_p[t] is drawn from the same distirbition
   }
 
@@ -18,18 +27,85 @@
 
 # priors: beta_phi[t], alpha_p[t], tau_p, mu_p, beta_age, sigma_p (where t is 34 occasions)
 
+# Logit survival model with year effect + first-year duckling effect
+  for (i in 1:nind) {
+    for (t in 1:(n.occasions-1)) { # indexed as ph[1] = 1992->1993, ice_days_c[1] = winter 1992->1993
+      logit(phi[i,t]) <- beta_ice0 + beta_ice1 * ice_days_c[t] + beta_ice2 * pow(ice_days_c[t], 2) + beta_first * first_yr_duckling[i,t] + year_effect[t]
+  }
+}
   # Likelihood
   for (i in 1:nind) {
-    z[i, f[i]] <- 1               # Latent state conditional on first capture 
-     # ---- State process ----
+    for (t in 1:(f[i]-1)){ # index of occasions before first capture for each individual i (needed because is_resight[k] (years with resight effort) in detection would otherwise be evaluated at k < f)
+      z[i,t] <- 0 # set z to 0 pre-capture to ensure z exists everywhere and indicates an individ was not avail for detetection at t < f
+    }
+      z[i, f[i]] <- 1               # Latent state conditional on first capture (f[i]) 
+     # State process 
     for (t in (f[i] + 1):n.occasions) { # indexed to n.occasions because individs are observed at each t
-      mu1[i,t] <- phi[t - 1] * z[i, t - 1] # assign phi for preceding occasion conditional on z of preceding occasion (dead individs stay dead)
+      mu1[i,t] <- phi[i, t - 1] * z[i, t - 1] # assign phi for preceding occasion conditional on z of preceding occasion (dead individs stay dead)
       z[i,t] ~ dbern(mu1[i,t])             # draw state z from Bernoulli distrib with probability mu1 for each individ and occasion
-      # ---- Observation process ----
-      logit(p[i, t]) <- mu_p + alpha_p[t - 1] + beta_age * age_return[i, t] # assign model for detection prob (p)
-      mu2[i, t] <- p[i, t] * z[i, t] # assign effective detection prob (i.e., prob that individ i is observed at time t) conditional on individ is alive (z = 1; can't detect dead individs)
-      y[i, t] ~ dbern(mu2[i, t])     # draw y (obsevation of capture 1 or non-capture 0) with probability mu2, same as p[i, t] if individ is alive; links observation process to the state process
-    } # close time
-  } # close individuals
+       } # close time
+     } # close individuals
+      # detection model
+      for (i in 1:nind) {
+        for (t in 1:n.occasions) {
+      logit(p[i, t]) <- mu_p + alpha_p[t] + beta_age * age_return[i, t] # covariates on detection: random year, fixed age-class 3rd summer
+     } # close time
+      } # close individuals
+      # Observation model
+    for (i in 1:nind){ # loop over individs
+      for (k in 1:n_resight){ # loop over occasions with resight effort (index vector n_resight)
+      
+      mu2[i, is_resight[k]] <-  # assign effective detection prob (i.e., prob that individ i is observed at time t), conditional on:
+      p[i, is_resight[k]] * # individual detection probability
+      z[i, is_resight[k]] * # latent state to ensure only individs that not already dead are resighted
+      step(is_resight[k] - f[i]) * # indicator function to prevent modeling detection at or before marking
+      avail[i,is_resight[k]] # indicator matrix to filter the 2nd summer of individs marked as ducklings
+      
+      y[i, is_resight[k]] ~ dbern(mu2[i, is_resight[k]]) # observation model with detection drawn from Bernoulli dist with prob mu2 if alive and post capture, otherwise 0 (detection not possble)
+     
+     # replciate data for posterior predictive fit assessment
+      y_rep[i, is_resight[k]] ~ dbern(mu2[i, is_resight[k]])
+     
+     # Get posterior of log-likelihood values for calculating WAIC
+       log_lik[i, is_resight[k]] <- logdensity.bern(y[i, is_resight[k]], mu2[i, is_resight[k]])
+     
+     } # close time
+      } # close individuals
+  
+  
+  # derived values
+#  # without random effects (averages year-to-year variation)
+#  for (t in 1:(n.occasions - 1)) {
+#
+#  logit(phi_adult[t]) <- 
+#    beta_ice0 + 
+#    beta_ice1 * ice_days_c[t] + 
+#    beta_ice2 * pow(ice_days_c[t], 2)
+#
+#  logit(phi_first[t]) <- 
+#    beta_ice0 + 
+#    beta_ice1 * ice_days_c[t] + 
+#    beta_ice2 * pow(ice_days_c[t], 2) + 
+#    beta_first
+#  }
+#  
+#  # with random year effect on phi
+#  for (t in 1:(n.occasions - 1)) {
+#  logit(phi_realized_adult[t]) <-
+#    beta_ice0 +
+#   beta_ice1 * ice_days_c[t] +
+#    beta_ice2 * pow(ice_days_c[t], 2) +
+#    year_effect[t]
+#
+# logit(phi_realized_first[t]) <-
+#    beta_ice0 +
+#    beta_ice1 * ice_days_c[t] +
+#    beta_ice2 * pow(ice_days_c[t], 2) +
+#    beta_first +
+#    year_effect[t]
+#
+#  }
+#
     } # close model statement
+
     
